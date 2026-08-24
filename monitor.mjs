@@ -48,9 +48,11 @@ async function runMonitor() {
   }
 
   const previous = await readState();
+  const checkedAt = Date.now();
   const next = {
-    version: 2,
-    checkedAt: Date.now(),
+    version: 3,
+    checkedAt,
+    lastHealthAt: previous.lastHealthAt || null,
     leaders: {},
     errors: {},
   };
@@ -76,6 +78,23 @@ async function runMonitor() {
     }
   } else {
     console.log("两名带单员均无实质变化，不发送通知。");
+  }
+
+  const healthDue =
+    !previous.lastHealthAt ||
+    checkedAt - Number(previous.lastHealthAt) >= 60 * 60 * 1000;
+  if (healthDue) {
+    const health = buildHealthNotification(next);
+    if (dryRun) {
+      console.log(health.content);
+      console.log("健康通知试运行完成，未实际推送。");
+    } else {
+      await sendPushPlus(health.title, health.content);
+      console.log(`已推送每小时健康通知：${health.ok ? "监控正常" : "监控异常"}。`);
+    }
+    next.lastHealthAt = checkedAt;
+  } else {
+    console.log("距离上次健康通知不足60分钟，本次不重复发送。");
   }
 
   await saveState(next);
@@ -677,6 +696,44 @@ function buildPreviewNotification() {
     "开仓、加仓、减仓、平仓、反手将分别用 🟢、🔵、🟠、✅、🔴 标出。",
     simulationNotice(),
   ].join("\n");
+}
+
+function buildHealthNotification(state) {
+  const errors = Object.entries(state.errors || {});
+  if (errors.length > 0) {
+    return {
+      ok: false,
+      title: "⚠️【监控异常】双带单云端检查",
+      content: [
+        "# ⚠️【监控异常｜需要检查】",
+        "> 每小时健康检查已执行，但部分公开数据无法确认。",
+        "",
+        `- 检查时间：${formatTime(state.checkedAt)}`,
+        "- 检查频率：计划每5分钟（GitHub可能延迟）",
+        ...errors.map(([name, message]) => `- ${name}：${message}`),
+        "",
+        "本消息只报告监控状态，不代表仓位发生变化。",
+        simulationNotice(),
+      ].join("\n"),
+    };
+  }
+  return {
+    ok: true,
+    title: "✅【监控正常】双带单云端在线",
+    content: [
+      "# ✅【监控正常｜无需操作】",
+      "> 本次云端检查完成，两名带单员的公开数据均读取成功。",
+      "",
+      `- 检查时间：${formatTime(state.checkedAt)}`,
+      "- 监控对象：熬鹰资本、皮卡丘征服星辰大海",
+      "- 检查频率：计划每5分钟（GitHub可能延迟）",
+      "- 交易提醒：只有开仓、加仓、减仓、平仓、反手等实质变化才立即推送",
+      "- 健康通知：约每60分钟一次",
+      "",
+      "本消息只报告监控状态，不代表仓位发生变化，无需进行交易操作。",
+      simulationNotice(),
+    ].join("\n"),
+  };
 }
 
 function actionIcon(value) {

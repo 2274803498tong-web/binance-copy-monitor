@@ -14,7 +14,7 @@ on:
         default: ""
         type: string
   schedule:
-    - cron: "2/5 * * * *"
+    - cron: "*/5 * * * *"
 
 permissions:
   contents: read
