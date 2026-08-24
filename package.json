@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test:connectivity": "node test-binance.mjs"
+    "test:connectivity": "node test-binance.mjs",
+    "monitor": "node monitor.mjs"
   },
   "engines": {
     "node": ">=20"

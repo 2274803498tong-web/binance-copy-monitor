@@ -1,0 +1,45 @@
+name: 手动测试双带单监控
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: binance-copy-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 读取仓库
+        uses: actions/checkout@v5
+
+      - name: 配置 Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: 恢复上一次公开状态
+        uses: actions/cache/restore@v5
+        with:
+          path: .state/monitor.json
+          key: monitor-state-${{ github.run_id }}
+          restore-keys: monitor-state-
+
+      - name: 运行只读监控
+        env:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+          PUSHPLUS_TOPIC: binancecopy97
+        run: npm run monitor
+
+      - name: 保存本次公开状态
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: .state/monitor.json
+          key: monitor-state-${{ github.run_id }}
