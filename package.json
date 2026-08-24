@@ -1,0 +1,12 @@
+{
+  "name": "binance-copy-monitor",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:connectivity": "node test-binance.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
