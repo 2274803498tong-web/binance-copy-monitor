@@ -8,6 +8,11 @@ on:
         required: false
         default: false
         type: boolean
+      preview_topic:
+        description: "预览消息指定群组编码；留空时使用全部群组"
+        required: false
+        default: ""
+        type: string
   schedule:
     - cron: "2/5 * * * *"
 
@@ -42,8 +47,9 @@ jobs:
       - name: 运行只读监控
         env:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
-          PUSHPLUS_TOPIC: binancecopy97
+          PUSHPLUS_TOPICS: binancecopy97,binancecopy98
           PREVIEW_UI: ${{ github.event.inputs.preview_ui || 'false' }}
+          PREVIEW_TOPIC: ${{ github.event.inputs.preview_topic || '' }}
         run: npm run monitor
 
       - name: 保存本次公开状态

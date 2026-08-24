@@ -8,3 +8,5 @@
 - 不代表真实成交
 
 GitHub Actions 云端连通性测试已通过。完整监控已启用，计划约每5分钟运行一次；平台繁忙时可能延迟。
+
+PushPlus 同时发送到群组 `binancecopy97` 和 `binancecopy98`。

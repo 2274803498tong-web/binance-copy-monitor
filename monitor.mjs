@@ -36,7 +36,13 @@ async function runMonitor() {
   if (process.env.PREVIEW_UI === "true") {
     const preview = buildPreviewNotification();
     if (dryRun) console.log(preview);
-    else await sendPushPlus("🎨【样式预览｜无需操作】监控通知", preview);
+    else {
+      await sendPushPlus(
+        "🎨【样式预览｜无需操作】监控通知",
+        preview,
+        process.env.PREVIEW_TOPIC || undefined,
+      );
+    }
     console.log("通知样式预览已生成，不读取或修改监控状态。");
     return;
   }
@@ -481,27 +487,39 @@ async function getGateContract(binanceSymbol) {
   };
 }
 
-async function sendPushPlus(title, content) {
-  const response = await fetch("https://www.pushplus.plus/send", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      token: process.env.PUSHPLUS_TOKEN,
-      ...(process.env.PUSHPLUS_TOPIC
-        ? { topic: process.env.PUSHPLUS_TOPIC }
-        : {}),
-      title,
-      content,
-      template: "markdown",
-      channel: "wechat",
-    }),
-    signal: AbortSignal.timeout(20000),
-  });
-  const payload = await response.json().catch(() => null);
-  if (!response.ok || payload?.code !== 200) {
-    throw new Error(
-      `PushPlus发送失败（HTTP ${response.status}，${payload?.code || "无代码"}：${payload?.msg || "无说明"}）`,
-    );
+async function sendPushPlus(title, content, topicOverride) {
+  const configuredTopics =
+    topicOverride ||
+    process.env.PUSHPLUS_TOPICS ||
+    process.env.PUSHPLUS_TOPIC ||
+    "";
+  const topics = configuredTopics
+    .split(",")
+    .map((topic) => topic.trim())
+    .filter(Boolean);
+  const targets = topics.length > 0 ? topics : [null];
+
+  for (const topic of targets) {
+    const response = await fetch("https://www.pushplus.plus/send", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        token: process.env.PUSHPLUS_TOKEN,
+        ...(topic ? { topic } : {}),
+        title,
+        content,
+        template: "markdown",
+        channel: "wechat",
+      }),
+      signal: AbortSignal.timeout(20000),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || payload?.code !== 200) {
+      throw new Error(
+        `PushPlus发送失败（群组 ${topic || "默认一对一"}，HTTP ${response.status}，${payload?.code || "无代码"}：${payload?.msg || "无说明"}）`,
+      );
+    }
+    console.log(`PushPlus发送成功：${topic || "默认一对一"}`);
   }
 }
 
