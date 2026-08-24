@@ -1,7 +1,9 @@
-name: 手动测试双带单监控
+name: 双带单监控（每5分钟）
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "2/5 * * * *"
 
 permissions:
   contents: read
