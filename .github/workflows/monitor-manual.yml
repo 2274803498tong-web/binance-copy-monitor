@@ -1,4 +1,4 @@
-name: 双带单监控（每5分钟）
+name: 双带单监控（Cloudflare每5分钟触发）
 
 on:
   workflow_dispatch:
@@ -13,9 +13,6 @@ on:
         required: false
         default: ""
         type: string
-  schedule:
-    - cron: "*/5 * * * *"
-
 permissions:
   contents: read
 
