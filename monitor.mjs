@@ -50,9 +50,10 @@ async function runMonitor() {
   const previous = await readState();
   const checkedAt = Date.now();
   const next = {
-    version: 3,
+    version: 4,
     checkedAt,
-    lastHealthAt: previous.lastHealthAt || null,
+    lastStatusAt: previous.lastStatusAt || previous.lastHealthAt || null,
+    checksSinceStatus: Number(previous.checksSinceStatus || 0) + 1,
     leaders: {},
     errors: {},
   };
@@ -67,6 +68,12 @@ async function runMonitor() {
     }
   }
 
+  const operationDetected = notices.some(
+    (notice) =>
+      notice.includes("【需要你处理】") ||
+      notice.includes("【需要人工核对】"),
+  );
+
   if (notices.length > 0) {
     const content = notices.join("\n\n---\n\n");
     if (dryRun) {
@@ -80,21 +87,34 @@ async function runMonitor() {
     console.log("两名带单员均无实质变化，不发送通知。");
   }
 
-  const healthDue =
-    !previous.lastHealthAt ||
-    checkedAt - Number(previous.lastHealthAt) >= 60 * 60 * 1000;
-  if (healthDue) {
-    const health = buildHealthNotification(next);
+  if (operationDetected) {
+    next.lastStatusAt = checkedAt;
+    next.checksSinceStatus = 0;
+  }
+
+  const statusDue =
+    !operationDetected &&
+    (!next.lastStatusAt ||
+      checkedAt - Number(next.lastStatusAt) >= 60 * 60 * 1000);
+  if (statusDue) {
+    const status = buildHourlyStatusNotification(next);
     if (dryRun) {
-      console.log(health.content);
-      console.log("健康通知试运行完成，未实际推送。");
+      console.log(status.content);
+      console.log("每小时状态通知试运行完成，未实际推送。");
     } else {
-      await sendPushPlus(health.title, health.content);
-      console.log(`已推送每小时健康通知：${health.ok ? "监控正常" : "监控异常"}。`);
+      await sendPushPlus(status.title, status.content);
+      console.log(
+        `已推送每小时状态通知：${status.ok ? "无操作" : "监控异常"}。`,
+      );
     }
-    next.lastHealthAt = checkedAt;
+    next.lastStatusAt = checkedAt;
+    next.checksSinceStatus = 0;
   } else {
-    console.log("距离上次健康通知不足60分钟，本次不重复发送。");
+    console.log(
+      operationDetected
+        ? "已推送操作变化，本次不再发送无操作通知。"
+        : "距离上次状态通知不足60分钟，本次保持静默。",
+    );
   }
 
   await saveState(next);
@@ -245,6 +265,13 @@ async function checkPikachu(previous, next, notices) {
       }
       lines.push(
         "**先看上方待办，再看下方换算；加仓时不要把目标总仓当成本次新增仓位。**",
+        "",
+        ...buildPikachuOperationSummary(
+          changes,
+          positions,
+          oldPositions,
+          next.checkedAt,
+        ),
       );
     }
     lines.push(
@@ -296,6 +323,12 @@ async function checkPikachu(previous, next, notices) {
         positionChanges.length > 0
           ? `## ${actionIcon(positionChanges.join(" "))}【${changeTypeLabel(positionChanges)}】${position.symbol} ${positionDirection(position.positionSide)}`
           : `## 📍 ${position.symbol} ${positionDirection(position.positionSide)}`,
+        ...(positionChanges.length > 0
+          ? [
+              `- 变化检测时间：${formatTime(next.checkedAt)}`,
+              "- 精确成交时间：币安公开仓位接口未提供",
+            ]
+          : []),
         `- 保证金模式：${position.isolated ? "逐仓" : "全仓"}`,
         `- 杠杆：${fmt(leverage, 2)}x`,
         `- 仓位数量：${fmt(Math.abs(Number(position.positionAmount)), 8)}`,
@@ -382,8 +415,12 @@ async function checkPikachu(previous, next, notices) {
         `# ✅【平仓】${position.symbol} ${positionDirection(position.positionSide)}`,
         "> **币安公开 positionAmount 已由非0变为0。**",
         "> **纸面模拟待办：核对并平掉对应方向的全部模拟仓位。**",
+        `- 变化检测时间：${formatTime(next.checkedAt)}`,
+        "- 精确平仓时间与成交价：币安公开仓位接口未提供",
         `- 平仓前公开数量：${fmt(Math.abs(Number(position.positionAmount)), 8)}`,
         `- 平仓前杠杆：${fmt(position.leverage, 2)}x`,
+        `- 上次公开开仓均价：${fmt(position.entryPrice, 8)} USDT`,
+        `- 上次公开标记价格：${fmt(position.markPrice, 8)} USDT`,
       );
       if (previousSimulation) {
         lines.push(
@@ -698,15 +735,15 @@ function buildPreviewNotification() {
   ].join("\n");
 }
 
-function buildHealthNotification(state) {
+function buildHourlyStatusNotification(state) {
   const errors = Object.entries(state.errors || {});
   if (errors.length > 0) {
     return {
       ok: false,
-      title: "⚠️【监控异常】双带单云端检查",
+      title: "⚠️【无法确认】双带单每小时状态",
       content: [
-        "# ⚠️【监控异常｜需要检查】",
-        "> 每小时健康检查已执行，但部分公开数据无法确认。",
+        "# ⚠️【无法确认是否有操作｜需要检查】",
+        "> 本次每小时状态检查发现部分公开数据读取失败，因此不能判断为“无操作”。",
         "",
         `- 检查时间：${formatTime(state.checkedAt)}`,
         "- 检查频率：计划每5分钟（GitHub可能延迟）",
@@ -719,21 +756,57 @@ function buildHealthNotification(state) {
   }
   return {
     ok: true,
-    title: "✅【监控正常】双带单云端在线",
+    title: "🟢【无操作】双带单每小时状态",
     content: [
-      "# ✅【监控正常｜无需操作】",
-      "> 本次云端检查完成，两名带单员的公开数据均读取成功。",
+      "# 🟢【最近约一小时无操作｜无需处理】",
+      "> 公开数据读取正常，本周期未检测到开仓、加仓、减仓、平仓、反手等操作变化。",
       "",
-      `- 检查时间：${formatTime(state.checkedAt)}`,
+      `- 最后检查时间：${formatTime(state.checkedAt)}`,
       "- 监控对象：熬鹰资本、皮卡丘征服星辰大海",
       "- 检查频率：计划每5分钟（GitHub可能延迟）",
-      "- 交易提醒：只有开仓、加仓、减仓、平仓、反手等实质变化才立即推送",
-      "- 健康通知：约每60分钟一次",
+      `- 本周期完成检查：${state.checksSinceStatus}次`,
+      "- 有操作时：立即推送币种、方向、检测/成交时间、价格、仓位与Gate纸面换算",
+      "- 无操作时：约每60分钟推送一次本消息",
       "",
-      "本消息只报告监控状态，不代表仓位发生变化，无需进行交易操作。",
+      "本消息表示未检测到公开操作变化，无需进行交易操作。",
       simulationNotice(),
     ].join("\n"),
   };
+}
+
+function buildPikachuOperationSummary(changes, positions, oldPositions, checkedAt) {
+  const grouped = new Map();
+  for (const change of changes) {
+    const symbol = change.split(" ")[0];
+    if (!grouped.has(symbol)) grouped.set(symbol, []);
+    grouped.get(symbol).push(change);
+  }
+  const lines = ["## ⭐ 本次操作变化"];
+  for (const [symbol, symbolChanges] of grouped) {
+    const current = positions.find((item) => item.symbol === symbol);
+    const previous = oldPositions.find((item) => item.symbol === symbol);
+    const reference = current || previous;
+    const types = [...new Set(symbolChanges.map(getChangeType))].join("＋");
+    lines.push(
+      "",
+      `### ${actionIcon(symbolChanges.join(" "))} ${symbol}｜${types}`,
+      `- **方向：${reference ? positionDirection(reference.positionSide) : "无法确认"}**`,
+      `- **操作时间：币安公开仓位接口未提供精确成交时间；本系统检测于 ${formatTime(checkedAt)}**`,
+    );
+    if (current) {
+      lines.push(
+        `- **公开开仓均价：${fmt(current.entryPrice, 8)} USDT**`,
+        `- 检测时标记价格：${fmt(current.markPrice, 8)} USDT`,
+      );
+    } else if (previous) {
+      lines.push(
+        "- **平仓成交价格：币安公开仓位接口未提供**",
+        `- 上次公开开仓均价：${fmt(previous.entryPrice, 8)} USDT`,
+        `- 上次公开标记价格：${fmt(previous.markPrice, 8)} USDT`,
+      );
+    }
+  }
+  return lines;
 }
 
 function actionIcon(value) {
