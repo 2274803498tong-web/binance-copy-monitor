@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "node --test trade-history.test.mjs",
     "test:connectivity": "node test-binance.mjs",
     "monitor": "node monitor.mjs"
   },

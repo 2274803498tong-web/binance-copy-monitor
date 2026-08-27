@@ -1,5 +1,10 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import {
+  aggregateFills,
+  completeTradeFills,
+  storedTradeIds,
+} from "./trade-history.mjs";
 
 const USER_CAPITAL_USDT = 97.69;
 const STATE_PATH = process.env.STATE_PATH || ".state/monitor.json";
@@ -50,7 +55,7 @@ async function runMonitor() {
   const previous = await readState();
   const checkedAt = Date.now();
   const next = {
-    version: 4,
+    version: 5,
     checkedAt,
     lastStatusAt: previous.lastStatusAt || previous.lastHealthAt || null,
     checksSinceStatus: Number(previous.checksSinceStatus || 0) + 1,
@@ -123,20 +128,20 @@ async function runMonitor() {
 async function checkAoYing(previous, next, notices) {
   const leader = LEADERS.aoYing;
   try {
+    const old = previous.leaders?.aoYing;
+    const oldIds = storedTradeIds(old);
     const [detail, fills] = await Promise.all([
       getLeaderDetail(leader.id),
-      getTradeHistory(leader.id),
+      getTradeHistory(leader.id, oldIds),
     ]);
     const groups = aggregateFills(fills).slice(0, 100);
-    const old = previous.leaders?.aoYing;
-    const oldKeys = new Set(old?.tradeKeys || []);
     const isFirstRun = !old;
     const changed = isFirstRun
       ? groups.slice(0, 2)
-      : groups.filter((item) => !oldKeys.has(item.key));
+      : groups.filter((item) => !oldIds.has(item.id));
 
     next.leaders.aoYing = {
-      tradeKeys: groups.map((item) => item.key),
+      tradeIds: groups.map((item) => item.id),
       marginBalance: detail.marginBalance,
       positionShow: detail.positionShow,
     };
@@ -482,38 +487,98 @@ async function getPositions(portfolioId) {
   );
 }
 
-async function getTradeHistory(portfolioId) {
-  const data = await fetchBinance(
-    `${BINANCE_BASE}/lead-portfolio/trade-history`,
-    {
-      method: "POST",
-      body: JSON.stringify({ portfolioId, pageNumber: 1, pageSize: 100 }),
-    },
-  );
-  return Array.isArray(data) ? data : data?.list || [];
+async function getTradeHistory(portfolioId, knownTradeIds) {
+  const pageSize = 200;
+  const maxPages = 30;
+  const fills = [];
+  let indexValue;
+
+  for (let pageNumber = 1; pageNumber <= maxPages; pageNumber += 1) {
+    const data = await fetchBinance(
+      `${BINANCE_BASE}/lead-portfolio/trade-history`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          portfolioId,
+          pageNumber,
+          pageSize,
+          ...(indexValue ? { indexValue } : {}),
+        }),
+      },
+    );
+    const page = Array.isArray(data) ? data : data?.list || [];
+    if (page.length === 0) return fills;
+    fills.push(...page);
+
+    const total = Number(data?.total);
+    const exhausted =
+      page.length < pageSize ||
+      (Number.isFinite(total) && fills.length >= total);
+    const complete = completeTradeFills(fills, exhausted);
+    const completeGroups = aggregateFills(complete);
+    const reachedKnownTrade = completeGroups.some((item) =>
+      knownTradeIds.has(item.id),
+    );
+    const enoughForBaseline =
+      knownTradeIds.size === 0 && completeGroups.length >= 2;
+
+    if (exhausted || reachedKnownTrade || enoughForBaseline) return complete;
+
+    const nextIndexValue = String(data?.indexValue || "");
+    if (!nextIndexValue || nextIndexValue === indexValue) {
+      throw new Error("币安交易历史分页游标无效，无法确认最新完整成交");
+    }
+    indexValue = nextIndexValue;
+  }
+
+  throw new Error("币安最新成交超过6000条，无法确认本轮全部变化");
 }
 
 async function fetchBinance(url, init = {}) {
-  const response = await fetch(url, {
-    ...init,
-    headers: { ...REQUEST_HEADERS, ...(init.headers || {}) },
-    signal: AbortSignal.timeout(20000),
-  });
-  const text = await response.text();
-  let payload;
-  try {
-    payload = JSON.parse(text);
-  } catch {
-    throw new Error(
-      `币安返回非JSON数据（HTTP ${response.status}），无法确认公开数据`,
-    );
+  const maxAttempts = 4;
+  let lastError;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    let retryable = true;
+    try {
+      const response = await fetch(url, {
+        ...init,
+        headers: { ...REQUEST_HEADERS, ...(init.headers || {}) },
+        signal: AbortSignal.timeout(20000),
+      });
+      const text = await response.text();
+      let payload;
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        retryable = response.status === 429 || response.status >= 500;
+        throw new Error(
+          `币安返回非JSON数据（HTTP ${response.status}），无法确认公开数据`,
+        );
+      }
+      if (!response.ok || !payload.success) {
+        retryable =
+          response.status === 429 ||
+          response.status >= 500 ||
+          payload.code === "11012005";
+        throw new Error(
+          `币安接口失败（HTTP ${response.status}，${payload.code || "无代码"}：${payload.message || "无说明"}）`,
+        );
+      }
+      return payload.data;
+    } catch (error) {
+      lastError = error;
+      if (!retryable || attempt === maxAttempts) throw error;
+    }
+
+    await delay(400 * 2 ** (attempt - 1));
   }
-  if (!response.ok || !payload.success) {
-    throw new Error(
-      `币安接口失败（HTTP ${response.status}，${payload.code || "无代码"}：${payload.message || "无说明"}）`,
-    );
-  }
-  return payload.data;
+
+  throw lastError;
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 async function getGateContract(binanceSymbol) {
@@ -577,49 +642,6 @@ async function sendPushPlus(title, content, topicOverride) {
     }
     console.log(`PushPlus发送成功：${topic || "默认一对一"}`);
   }
-}
-
-function aggregateFills(fills) {
-  const groups = new Map();
-  for (const fill of fills || []) {
-    const groupKey = [
-      fill.time,
-      fill.symbol,
-      fill.side,
-      fill.positionSide,
-    ].join("|");
-    const current = groups.get(groupKey) || {
-      time: Number(fill.time),
-      symbol: fill.symbol,
-      side: fill.side,
-      positionSide: fill.positionSide,
-      baseAsset: fill.baseAsset,
-      qty: 0,
-      notional: 0,
-      realizedProfit: 0,
-    };
-    current.qty += Number(fill.qty || 0);
-    current.notional += Number(fill.quantity || 0);
-    current.realizedProfit += Number(fill.realizedProfit || 0);
-    groups.set(groupKey, current);
-  }
-  return [...groups.values()]
-    .map((item) => {
-      const avgPrice = item.qty > 0 ? item.notional / item.qty : 0;
-      return {
-        ...item,
-        avgPrice,
-        key: [
-          item.time,
-          item.symbol,
-          item.side,
-          item.positionSide,
-          item.qty,
-          avgPrice,
-        ].join("|"),
-      };
-    })
-    .sort((a, b) => b.time - a.time);
 }
 
 function normalizePosition(item) {
