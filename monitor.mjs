@@ -4,6 +4,7 @@ import {
   aggregateFills,
   completeTradeFills,
   storedTradeIds,
+  tradeHistoryCursor,
 } from "./trade-history.mjs";
 
 const USER_CAPITAL_USDT = 97.69;
@@ -524,11 +525,7 @@ async function getTradeHistory(portfolioId, knownTradeIds) {
 
     if (exhausted || reachedKnownTrade || enoughForBaseline) return complete;
 
-    const nextIndexValue = String(data?.indexValue || "");
-    if (!nextIndexValue || nextIndexValue === indexValue) {
-      throw new Error("币安交易历史分页游标无效，无法确认最新完整成交");
-    }
-    indexValue = nextIndexValue;
+    indexValue = tradeHistoryCursor(data);
   }
 
   throw new Error("币安最新成交超过6000条，无法确认本轮全部变化");

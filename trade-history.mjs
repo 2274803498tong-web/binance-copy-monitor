@@ -26,6 +26,17 @@ export function completeTradeFills(fills, exhausted) {
   return fills.filter((fill) => Number(fill.time) > oldestTime);
 }
 
+export function tradeHistoryCursor(data) {
+  const cursor = String(data?.indexValue || "");
+  if (!cursor) {
+    throw new Error("币安交易历史分页游标缺失，无法确认最新完整成交");
+  }
+  // indexValue is the oldest timestamp on the page, not a unique page token.
+  // It legitimately repeats while one timestamp contains more than 200 fills;
+  // pageNumber is what advances through those fills.
+  return cursor;
+}
+
 export function aggregateFills(fills) {
   const groups = new Map();
   for (const fill of fills || []) {

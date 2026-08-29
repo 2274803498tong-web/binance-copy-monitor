@@ -5,6 +5,7 @@ import {
   aggregateFills,
   completeTradeFills,
   storedTradeIds,
+  tradeHistoryCursor,
 } from "./trade-history.mjs";
 
 function fill(time, qty, price = 100) {
@@ -47,6 +48,16 @@ test("migrates version 4 quantity-based keys to stable trade ids", () => {
   });
 
   assert.deepEqual([...ids], ["3000|ETHUSDT|BUY|LONG"]);
+});
+
+test("accepts a repeated timestamp cursor while pageNumber advances", () => {
+  const previousCursor = "3000";
+
+  assert.equal(tradeHistoryCursor({ indexValue: "3000" }), previousCursor);
+  assert.throws(
+    () => tradeHistoryCursor({}),
+    /分页游标缺失/,
+  );
 });
 
 function expectTrade(id, qty) {
