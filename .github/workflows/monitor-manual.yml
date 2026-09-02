@@ -49,6 +49,7 @@ jobs:
           restore-keys: monitor-state-
 
       - name: 运行只读监控
+        if: ${{ github.event.inputs.bitget_dry_run != 'true' }}
         env:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
           PUSHPLUS_TOPICS: binancecopy97,binancecopy98
