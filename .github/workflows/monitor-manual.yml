@@ -1,4 +1,4 @@
-name: 双带单监控（Cloudflare每5分钟触发）
+name: 带单与Bitget动态监控（Cloudflare每5分钟触发）
 
 on:
   workflow_dispatch:
@@ -13,6 +13,11 @@ on:
         required: false
         default: ""
         type: string
+      bitget_dry_run:
+        description: "只测试Bitget读取并打印通知，不推送微信、不修改正式状态"
+        required: false
+        default: false
+        type: boolean
 permissions:
   contents: read
 
@@ -37,7 +42,9 @@ jobs:
       - name: 恢复上一次公开状态
         uses: actions/cache/restore@v5
         with:
-          path: .state/monitor.json
+          path: |
+            .state/monitor.json
+            .state/bitget-insights.json
           key: monitor-state-${{ github.run_id }}
           restore-keys: monitor-state-
 
@@ -49,9 +56,19 @@ jobs:
           PREVIEW_TOPIC: ${{ github.event.inputs.preview_topic || '' }}
         run: npm run monitor
 
+      - name: 监控Bitget公开挂单动态
+        if: ${{ github.event.inputs.preview_ui != 'true' }}
+        env:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+          DRY_RUN: ${{ github.event.inputs.bitget_dry_run || 'false' }}
+          BITGET_STATE_PATH: ${{ github.event.inputs.bitget_dry_run == 'true' && '/tmp/bitget-insights-test.json' || '.state/bitget-insights.json' }}
+        run: npm run monitor:bitget
+
       - name: 保存本次公开状态
         if: always()
         uses: actions/cache/save@v5
         with:
-          path: .state/monitor.json
+          path: |
+            .state/monitor.json
+            .state/bitget-insights.json
           key: monitor-state-${{ github.run_id }}

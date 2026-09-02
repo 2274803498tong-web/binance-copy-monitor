@@ -4,9 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test trade-history.test.mjs",
+    "test": "node --test *.test.mjs",
     "test:connectivity": "node test-binance.mjs",
-    "monitor": "node monitor.mjs"
+    "monitor": "node monitor.mjs",
+    "monitor:bitget": "node bitget-insights-monitor.mjs"
   },
   "engines": {
     "node": ">=20"
