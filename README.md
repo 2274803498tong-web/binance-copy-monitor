@@ -15,6 +15,8 @@ GitHub Actions 云端连通性测试已通过。完整监控已启用，使用�
 
 同时监控 Bitget 观点用户“丶十一”（`Shi_Yi`）的公开动态。仅当新动态同时包含“入场/挂单”和“止损”字段时，才通过 PushPlus 发送微信通知；普通动态保持静默。首次运行只建立基线并发送启动确认，不把历史动态误报为新信号。
 
+Bitget 监控可通过 GitHub Actions 仓库变量 `BITGET_MONITOR_ENABLED` 单独控制。设为 `false` 时，定时任务会跳过 Bitget 步骤，但币安“熬鹰”监控照常运行；手动选择 `bitget_dry_run` 时仍可进行不推送微信的只读测试。
+
 Bitget 通知默认发送到 `PUSHPLUS_TOKEN` 绑定者的一对一微信，不进入上述币安群组。如需发群组，可增加 `BITGET_PUSHPLUS_TOPICS` 环境变量，多个群组编码用英文逗号分隔。
 
 监控只读取公开内容，不登录 Bitget、不使用交易 API Key、不自动下单。公开动态不代表真实成交，也不构成投资建议。

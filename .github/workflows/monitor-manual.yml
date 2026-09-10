@@ -63,7 +63,7 @@ jobs:
         run: npm run monitor
 
       - name: 监控Bitget公开挂单动态
-        if: ${{ always() && github.event.inputs.preview_ui != 'true' }}
+        if: ${{ always() && github.event.inputs.preview_ui != 'true' && (github.event.inputs.bitget_dry_run == 'true' || vars.BITGET_MONITOR_ENABLED != 'false') }}
         env:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
           DRY_RUN: ${{ github.event.inputs.bitget_dry_run || 'false' }}
